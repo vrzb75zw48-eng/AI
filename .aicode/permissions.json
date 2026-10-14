@@ -1,0 +1,9 @@
+{
+    "permissions": {
+        "allow": [
+            "mcp__np__np_list_installed_apps",
+            "mcp__np__np_execute_shell"
+        ],
+        "deny": []
+    }
+}

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="UI 转储工具"
+        android:textStyle="bold"
+        android:textSize="18sp"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/btnLaunchDouyin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="启动抖音"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnDump"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="转储当前 UI 树"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnTrigger"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="触发自动化"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvResult"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="就绪"
+        android:textSize="14sp"
+        android:textColor="#555" />
+</LinearLayout>
