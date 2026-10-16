@@ -122,7 +122,7 @@ if [ "${DO_ANDROID}" = "1" ]; then
     *) die "CC_BUILD_TYPE 只能是 debug-apk | release-apk | aab（当前：${CC_BUILD_TYPE}）" ;;
   esac
 
-  ccbuild android "autoCompile=false;debug=${DEBUG_OPT};packageName=${CC_PACKAGE};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
+  ccbuild android "autoCompile=false;debug=${DEBUG_OPT};packages.android.packageName=${CC_PACKAGE};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
   gradlew_run "${TASKS[@]}" "-PPROP_NDK_VERSION=${NDK_VER}"
 
   ART="$(find "${PROJ_DIR}/build" -type f -path '*/outputs/*' \( -name '*.apk' -o -name '*.aab' \) -print)"
