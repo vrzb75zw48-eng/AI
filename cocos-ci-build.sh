@@ -44,10 +44,12 @@ ccbuild() { # $1=platform  $2=额外 build 参数（分号分隔，可选）
   local params="platform=${platform}"
   [ -n "${extra}" ] && params="${params};${extra}"
   log "=== Cocos 3.8.8 build ${platform} ==="
-  local engine_arg=()
-  [ -n "${CC_ENGINE}" ] && engine_arg=(--engine "${CC_ENGINE}")
   set +e
-  "$CC_CREATOR" "${engine_arg[@]}" --project "${CC_PROJECT}" --build "${params}"
+  if [ -n "${CC_ENGINE}" ]; then
+    "$CC_CREATOR" --engine "${CC_ENGINE}" --project "${CC_PROJECT}" --build "${params}"
+  else
+    "$CC_CREATOR" --project "${CC_PROJECT}" --build "${params}"
+  fi
   local rc=$?
   set -e
   if [ "${rc}" -eq 36 ]; then
