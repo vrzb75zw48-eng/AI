@@ -2,7 +2,14 @@
     "permissions": {
         "allow": [
             "mcp__np__np_list_installed_apps",
-            "mcp__np__np_execute_shell"
+            "mcp__np__np_execute_shell",
+            "Bash(cd)",
+            "Bash(echo)",
+            "Bash(grep)",
+            "Bash(head)",
+            "Bash(for)",
+            "Bash(do)",
+            "Bash(done)"
         ],
         "deny": []
     }
