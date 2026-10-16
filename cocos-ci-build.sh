@@ -22,6 +22,7 @@ CC_PROJECT="${CC_PROJECT//\\//}"   # Windows 传入的 C:\a\b 统一成正斜杠
 CC_CREATOR="${CC_CREATOR:?需设 CC_CREATOR（Cocos Creator 3.8.8 可执行文件）}"
 CC_ENGINE="${CC_ENGINE:-}"                    # 可选：自定义引擎路径（传了则脱离编辑器默认引擎）
 CC_BUILD_TYPE="${CC_BUILD_TYPE:-debug-apk}"   # debug-apk | release-apk | aab
+CC_PACKAGE="${CC_PACKAGE:-com.aicode.cocosp}" # Android 包名（Cocos android 构建必填）
 
 # 引擎 native/README（v3.8.8）：Android 只支持 NDK 21~22，23+ 不支持
 NDK_VER="${NDK_VER:-21.4.7075529}"            # r21e
@@ -121,7 +122,7 @@ if [ "${DO_ANDROID}" = "1" ]; then
     *) die "CC_BUILD_TYPE 只能是 debug-apk | release-apk | aab（当前：${CC_BUILD_TYPE}）" ;;
   esac
 
-  ccbuild android "autoCompile=false;debug=${DEBUG_OPT};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
+  ccbuild android "autoCompile=false;debug=${DEBUG_OPT};packageName=${CC_PACKAGE};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
   gradlew_run "${TASKS[@]}" "-PPROP_NDK_VERSION=${NDK_VER}"
 
   ART="$(find "${PROJ_DIR}/build" -type f -path '*/outputs/*' \( -name '*.apk' -o -name '*.aab' \) -print)"
