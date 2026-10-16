@@ -1,0 +1,146 @@
+# Cocos Creator 3.8.8 —— 只出 Android（debug-apk / release-apk / aab）
+#
+# 流程：Cocos 编辑器 CLI 只生成 Gradle 工程（autoCompile=false），
+#       出包由工程自带 Gradle wrapper 驱动（assembleDebug / assembleRelease / bundleRelease）。
+#
+# 关键事实（cocos-engine v3.8.8 模板 + 官方文档核实）：
+#   - Gradle 根工程是 <项目>/build/android/proj（gradlew、gradle.properties、settings.gradle
+#     都在这里）；native/engine/android 只是 :app 模块与引擎 native 源码，不是出包目录。
+#   - 模板用 AGP 8.10.1 + Gradle wrapper 8.11.1，两者都要 JDK 17。
+#   - release 签名读 native/engine/android/app/build.gradle 的 signingConfigs.release，
+#     属性名是 RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS /
+#     RELEASE_KEY_PASSWORD（本流程用 ORG_GRADLE_PROJECT_* 环境变量注入，密码不进命令行）。
+#   - APK/AAB 落在 build/android/proj/build/CocosGame/outputs/{apk,bundle}/。
+#   - NDK 只能用 r21~r22（引擎 native/README：build Android 需 NDK 21-22，23+ 不支持）；
+#     这两个 NDK 不提供 darwin-arm64 宿主工具链，所以 runner 必须是 Intel
+#     （macos-15-intel，GitHub 提供到 2027-08；换 arm64 runner 就得换 NDK 版本）。
+#
+# 需配 Secrets：ANDROID_KEYSTORE（base64）/ ANDROID_KEYSTORE_PASSWORD /
+#               ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD
+# 可选 repo Variables：COCOS_MAC_ZIP（覆盖编辑器下载直链）、COCOS_CI_RUNNER（覆盖 runner 标签）
+#
+# 拷贝到 Cocos 工程 repo 的 .github/workflows/ 即可用；cocos-ci-build.sh 放 repo 根目录。
+
+name: Cocos CI 3.8.8 (Android)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "出什么包"
+        type: choice
+        options:
+          - debug-apk
+          - release-apk
+          - aab
+        default: debug-apk
+
+env:
+  COCOS_VERSION: "3.8.8"
+  # Cocos 工程在仓库的 cocosp/ 子目录（官方 hello-world 3.8 模板）
+  COCOS_DIR: "cocosp"
+  ANDROID_COMPILE_SDK: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_CMAKE: "3.22.1"
+  NDK_VERSION: "21.4.7075529"
+
+jobs:
+  android:
+    runs-on: ${{ vars.COCOS_CI_RUNNER || 'macos-15-intel' }}
+    timeout-minutes: 120
+    env:
+      # Cocos 官网只提供 Dashboard 安装，直链构建号需核对；失效时加 repo Variable 覆盖，无需改本文件
+      COCOS_MAC_ZIP: ${{ vars.COCOS_MAC_ZIP || 'https://download.cocos.com/CocosCreator/v3.8.8/CocosCreator-v3.8.8-mac-121518.zip' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析 build_type
+        run: |
+          BT="${{ inputs.build_type }}"
+          [ -n "$BT" ] || BT="debug-apk"
+          echo "BUILD_TYPE=$BT" >> "$GITHUB_ENV"
+          echo "本次出包：$BT"
+
+      - name: 装 JDK 17（AGP 8.10.1 要求）
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 装 Android cmdline-tools
+        uses: android-actions/setup-android@v4
+
+      - name: 装 Platform / Build-Tools / CMake / NDK
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "cmake;${ANDROID_CMAKE}" \
+            "ndk;${NDK_VERSION}"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: 装 Cocos Creator 3.8.8
+        run: |
+          set -euo pipefail
+          APP_DIR=/Applications/CocosCreator
+          if [ ! -d "$APP_DIR" ]; then
+            mkdir -p "$APP_DIR"
+            echo "下载 ${COCOS_MAC_ZIP}"
+            curl -fsSL --retry 3 --retry-delay 5 -o /tmp/cc.zip "$COCOS_MAC_ZIP"
+            ditto -x -k /tmp/cc.zip "$APP_DIR"   # ditto 保留 mac 元数据/符号链接
+            rm -f /tmp/cc.zip
+          fi
+          # zip 里 CocosCreator.app 就在根（已用 HTTP range 读 zip 头确认），解到 APP_DIR 后即一层
+          BIN="$APP_DIR/CocosCreator.app/Contents/MacOS/CocosCreator"
+          [ -f "$BIN" ] || BIN="$APP_DIR/CocosCreator/CocosCreator.app/Contents/MacOS/CocosCreator"
+          [ -f "$BIN" ] || { echo "::error::未找到 CocosCreator.app（COCOS_MAC_ZIP 直链是否失效？）"; ls -l "$APP_DIR"; exit 1; }
+          chmod +x "$BIN"
+          echo "CC_CREATOR=$BIN" >> "$GITHUB_ENV"
+          echo "Cocos CLI：$BIN"
+
+      - name: 注入 release keystore
+        if: env.BUILD_TYPE != 'debug-apk'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEYSTORE_B64" ] || { echo "::error::缺 secret ANDROID_KEYSTORE（base64 后的 keystore）"; exit 1; }
+          printf '%s' "$KEYSTORE_B64" | tr -d '\n\r' | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+          ls -l "$GITHUB_WORKSPACE/release.keystore"
+
+      - name: Cocos 生成工程 + Gradle wrapper 出包
+        env:
+          CC_PROJECT: ${{ github.workspace }}/${{ env.COCOS_DIR }}
+          CC_BUILD_TYPE: ${{ env.BUILD_TYPE }}
+          NDK_HOME: ${{ env.NDK_HOME }}
+          NDK_VER: ${{ env.NDK_VERSION }}
+          RELEASE_STORE_FILE: ${{ github.workspace }}/release.keystore
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash ./cocos-ci-build.sh android
+
+      - name: 校验并收集产物
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find "${COCOS_DIR}/build/android/proj/build" -type f -path '*/outputs/*' \( -name '*.apk' -o -name '*.aab' \) -exec cp -v {} dist/ \;
+          [ -n "$(ls -A dist)" ] || { echo "::error::dist 为空，Gradle 输出路径不对？"; find "${COCOS_DIR}/build" -maxdepth 4 -type d; exit 1; }
+          APKSIGNER="$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          for f in dist/*.apk; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            "$APKSIGNER" verify --print-certs "$f"
+            unzip -l "$f" | grep -E 'lib/[^/]+/libcocos\.so' || echo "::warning::$f 里没有 libcocos.so（ABI 是否被裁掉？）"
+          done
+          ls -lh dist
+
+      - name: 上传 apk/aab
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ env.BUILD_TYPE }}
+          path: dist/
