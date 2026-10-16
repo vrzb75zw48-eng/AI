@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ============================================================
+# 本地/容器内 gradle 打壳出 apk（不等 Cocos CLI）
+# 前提：Cocos 编辑器 build android 已生成 Gradle 工程（<工程>/build/android/proj），
+#       且引擎 .so 已在别处编好并拷进工程（本脚本不跑 NDK/CMake 重编 native）。
+#       Cocos 3.8.8 模板用 AGP 8.10.1 + Gradle wrapper 8.11.1，两者都要 JDK 17；
+#       wrapper 首次运行需联网下载 gradle 发行包。
+# 用法：
+#   RELEASE_STORE_FILE=ks.jks RELEASE_STORE_PASSWORD=x RELEASE_KEY_ALIAS=k \
+#     RELEASE_KEY_PASSWORD=x ./build-apk-local <Cocos工程路径> [release|debug]
+# 默认 release。产物：<工程>/build/android/proj/build/CocosGame/outputs/
+# ============================================================
+set -euo pipefail
+
+ROOT="${1:?用法: build-apk-local <Cocos工程路径> [release|debug]}"
+ROOT="${ROOT//\\//}"
+MODE="${2:-release}"
+[ -d "$ROOT" ] || { echo "!! 工程路径不存在：$ROOT"; exit 1; }
+PROJ="$ROOT/build/android/proj"
+[ -f "$PROJ/settings.gradle" ] || { echo "!! 未找到 Gradle 工程 $PROJ（Cocos 编辑器 build android 是否跑过？）"; exit 1; }
+
+echo ">> 引擎 .so 检查："
+SO="$(find "$ROOT/native/engine/android" -name '*.so' -print 2>/dev/null | head -5 || true)"
+if [ -n "$SO" ]; then echo "$SO"; else echo "   （没找到 .so：装到设备后会因缺 native 库起不来，需先把编好的 .so 拷进工程）"; fi
+
+TASK=assembleDebug
+if [ "$MODE" = "release" ]; then
+  TASK=assembleRelease
+  : "${RELEASE_STORE_FILE:?release 需 RELEASE_STORE_FILE（keystore 路径）}"
+  : "${RELEASE_STORE_PASSWORD:?release 需 RELEASE_STORE_PASSWORD}"
+  : "${RELEASE_KEY_ALIAS:?release 需 RELEASE_KEY_ALIAS}"
+  : "${RELEASE_KEY_PASSWORD:?release 需 RELEASE_KEY_PASSWORD}"
+  [ -f "$RELEASE_STORE_FILE" ] || { echo "!! keystore 不存在：$RELEASE_STORE_FILE"; exit 1; }
+  # Cocos 模板 signingConfigs.release 读的正是这 4 个工程属性；
+  # ORG_GRADLE_PROJECT_* 注入等价于 -P，密码不进命令行参数
+  export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE="$RELEASE_STORE_FILE"
+  export ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD="$RELEASE_STORE_PASSWORD"
+  export ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS="$RELEASE_KEY_ALIAS"
+  export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD="$RELEASE_KEY_PASSWORD"
+fi
+
+GRADLE=./gradlew
+if [ ! -f "$PROJ/gradlew" ]; then
+  command -v gradle >/dev/null || { echo "!! 既无 $PROJ/gradlew 也无系统 gradle"; exit 1; }
+  GRADLE=gradle
+else
+  chmod +x "$PROJ/gradlew" || true
+fi
+
+echo ">> gradle $TASK（cwd=$PROJ）"
+( cd "$PROJ" && "$GRADLE" clean "$TASK" --no-daemon )
+
+echo ">> apk/aab 产物："
+find "$PROJ/build" -type f \( -name '*.apk' -o -name '*.aab' \) -print

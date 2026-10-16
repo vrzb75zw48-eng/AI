@@ -1,0 +1,105 @@
+# Cocos Creator 3.8.8 出 Android apk —— GitHub 云 macOS runner（无需本机 Windows/mac）
+# 官方结构（docs.cocos.com 3.8 核实）：
+#   Cocos build android → AS 工程在 <项目>/build/android/proj；APK 在 proj/build/outputs
+#   签名在 Cocos 构建面板填 keystore（写进工程 signingConfig），gradle 直接出包
+name: Cocos CI 3.8.8 (Android - macOS runner)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "debug-apk / release-apk / aab"
+        default: debug-apk
+
+env:
+  COCOS_VERSION: "3.8.8"
+  # Cocos mac 直链：构建号(121518)/命名按 download.cocos.com 最新核对；或 Cocos Dashboard
+  COCOS_MAC_ZIP: "https://download.cocos.com/CocosCreator/v3.8.8/CocosCreator-v3.8.8-mac-121518.zip"
+  CC_CREATOR: "/Applications/CocosCreator/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator"
+  NDK_VERSION: "21.4.7075529"   # r21b（Cocos 3.8 推荐 r18~21）
+
+jobs:
+  android:
+    runs-on: macos-latest   # GitHub 云 macOS runner（免费额度内）
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 Cocos Creator 3.8.8（mac）
+        run: |
+          if [ ! -d "/Applications/CocosCreator/Creator/${COCOS_VERSION}" ]; then
+            curl -fL -o /tmp/cc.zip "${COCOS_MAC_ZIP}"
+            ditto -x -k /tmp/cc.zip /Applications/CocosCreator/   # ditto 保留 mac 元数据
+            rm -f /tmp/cc.zip
+          fi
+
+      - name: 装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK + NDK（mac darwin 版，自动）
+        # 参数名(ndk-version/platform-version)按该 action 文档核对；NDK 架构依 runner 芯片
+        uses: ReactiveCircus/android-build-action@4.1.1
+        with:
+          ndk-version: "${{ env.NDK_VERSION }}"
+          platform-version: "34"
+
+      - name: Cocos 生成 Android 工程（build/android/proj）+ 自动编译
+        env:
+          NDK_HOME: $NDK_HOME
+          ANDROID_HOME: $ANDROID_HOME
+        run: |
+          # 官方：build android 生成 AS 工程在 <项目>/build/android/proj；autoCompile 编引擎 .so
+          # debug 用 Cocos 默认调试 keystore（免配）；release 需 build 面板/configPath 传 keystore
+          "${CC_CREATOR}" --project "$GITHUB_WORKSPACE" \
+            --build "platform=android;autoCompile=true;debug=true;ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
+          [ $? -eq 36 ] || { echo "Cocos android build 失败（退出码 $?；32=参数非法/34=过程出错，查 log）"; exit 1; }
+          echo "AS 工程：$GITHUB_WORKSPACE/build/android/proj"
+
+      - name: 注入 release keystore（仅 release-aab 需要；debug 用 Cocos 默认）
+        if: ${{ inputs.build_type == 'release-apk' || inputs.build_type == 'aab' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+          # release：Cocos build 需把该 keystore 写进工程 signingConfig（用 configPath 或 packages.android.keystore* 传）
+          # 上面 Cocos build 步骤用 debug 生成工程后，release 出包在 gradle 步骤用 signingConfig 覆盖
+
+      - name: gradle 出 apk（proj/gradlew）
+        env:
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          PROJ="$GITHUB_WORKSPACE/build/android/proj"
+          [ -d "$PROJ" ] || { echo "AS 工程 $PROJ 未生成（Cocos build 那步失败？）"; exit 1; }
+          cd "$PROJ"
+          case "${{ inputs.build_type }}" in
+            debug-apk)
+              ./gradlew assembleDebug --no-daemon ;;
+            release-apk|aab)
+              # 正式签名：Cocos 3.8 由构建面板 keystore 写进工程 signingConfig；
+              # 若工程未配 release signingConfig，可临时注入（参数名依你工程 build.gradle 核对）
+              ./gradlew assembleRelease bundleRelease --no-daemon \
+                -Pcc.storeFile="$GITHUB_WORKSPACE/release.keystore" \
+                -Pcc.storePassword="$STORE_PASS" -Pcc.keyAlias="$KEY_ALIAS" -Pcc.keyPassword="$KEY_PASS" ;;
+          esac
+          echo "产物：$PROJ/build/outputs/（apk 在 apk/，aab 在 bundle/）"
+
+      - name: 上传 apk/aab
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ inputs.build_type }}
+          path: |
+            build/android/proj/build/outputs/**/*.apk
+            build/android/proj/build/outputs/**/*.aab
+
+# 踩坑（Cocos 3.8 Android）：
+# - AS 工程在 build/android/proj（不是 native/engine/android，那是引擎源码目录）
+# - NDK 版本必须 r18~21（缺 LIB_EGL / dlopen 失败就换 NDK）；gradle 插件 8.0.2 + JDK 17
+# - release 签名走 Cocos 构建面板 keystore（写进 signingConfig）；CLI 用 configPath/packages 传，字段名依 3.8.8 核对
+# - 路径大小写敏感、无空格；Android 只认小写/无特殊字符文件名

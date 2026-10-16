@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">SparkKeeper</string>
-    <string name="accessibility_description">自动操作抖音续火花服务</string>
-    <string name="accessibility_service_name">SparkKeeper 无障碍服务</string>
-</resources>

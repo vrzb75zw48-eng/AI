@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# ============================================================
+# 容器内一键调用：触发 Cocos CI 出 apk/aab + 拉回本地
+# 用 curl + GitHub API（无 gh / 无 jq/无 unzip，python3 解析 JSON 与解压）
+# 容器当「CI 触发台」：真正出包在 runner（Cocos 编辑器 + NDK + Gradle wrapper，见 workflow 注释），
+# 容器只负责触发 + 轮询 + 下载产物。
+#
+# 前置：
+#   1. Cocos 工程 repo 已放 .github/workflows/cocos-ci-android.yml
+#      且配好 4 个 keystore secrets（ANDROID_KEYSTORE*）
+#   2. 生成 GitHub PAT（权限 repo + workflow），设为 GITHUB_TOKEN
+#   3. 设 GH_REPO=owner/repo
+# 用法：
+#   GH_REPO=owner/repo GITHUB_TOKEN=*** ./build-apk [apk|release-apk|aab]
+# 可选环境变量：COCOS_WORKFLOW（默认 cocos-ci-android.yml）、GH_REF（默认 main）
+# ============================================================
+set -euo pipefail
+
+REPO="${GH_REPO:?需设 GH_REPO=owner/repo}"
+TOK="${GITHUB_TOKEN:?需设 GITHUB_TOKEN（PAT，需 repo+workflow 权限）}"
+API_BASE="${GH_API_BASE:-https://api.github.com}"   # GH_API_BASE 可覆盖（自测 / GHES）
+WF="${COCOS_WORKFLOW:-cocos-ci-android.yml}"
+REF="${GH_REF:-main}"
+API="${API_BASE}/repos/${REPO}"
+AUTH="Authorization: token ${TOK}"
+ACC="Accept: application/vnd.github+json"
+
+case "${1:-debug-apk}" in
+  apk|debug|debug-apk) BTYPE="debug-apk" ;;
+  release|release-apk) BTYPE="release-apk" ;;
+  aab)                 BTYPE="aab" ;;
+  *) echo "!! 参数只能是 apk | release-apk | aab"; exit 2 ;;
+esac
+
+json() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d${1})"; }
+
+echo ">> 触发 ${WF}（ref=${REF}, build_type=${BTYPE}）"
+curl -fsS -X POST -H "$AUTH" -H "$ACC" \
+  -d "{\"ref\":\"${REF}\",\"inputs\":{\"build_type\":\"${BTYPE}\"}}" \
+  "${API}/actions/workflows/${WF}/dispatches" >/dev/null
+echo "   已触发，等待 CI 启动..."
+sleep 20
+
+RUN="$(curl -fsS -H "$AUTH" -H "$ACC" "${API}/actions/workflows/${WF}/runs?per_page=1" | json "['workflow_runs'][0]['id']")"
+[ -n "${RUN}" ] || { echo "!! 未拿到 run id（workflow 文件名对不对？）"; exit 1; }
+echo ">> run=${RUN}，轮询直到完成（每 30s）"
+CONC=""
+while :; do
+  STATE="$(curl -fsS -H "$AUTH" -H "$ACC" "${API}/actions/runs/${RUN}" | json "['status'] + ' ' + str(d['conclusion'] or '')")"
+  STATUS="${STATE%% *}"; CONC="${STATE#* }"
+  echo "   status=${STATUS} conclusion=${CONC:-<运行中>}"
+  [ "${STATUS}" = "completed" ] && break
+  sleep 30
+done
+[ "${CONC}" = "success" ] || { echo "!! CI 未成功（conclusion=${CONC}），去 Actions 看日志"; exit 1; }
+
+# 产物下载：/artifacts 返回 JSON，逐条 archive_download_url（会 302 到 blob，
+# curl -L 在跨主机重定向时不会带上 Authorization，正好）
+ART="$(curl -fsS -H "$AUTH" -H "$ACC" "${API}/actions/runs/${RUN}/artifacts" \
+       | json "['artifacts'][0]['archive_download_url'] if d['artifacts'] else ''")"
+[ -n "${ART}" ] || { echo "!! run 里没有 artifact（CI 是否真上传成功？）"; exit 1; }
+
+OUT="./apk-out"; rm -rf "$OUT"; mkdir -p "$OUT"
+echo ">> 下载产物 zip..."
+curl -fsSL -H "$AUTH" -H "$ACC" "$ART" -o "${OUT}/pkg.zip"
+python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "${OUT}/pkg.zip" "$OUT"
+rm -f "${OUT}/pkg.zip"
+echo ">> 完成，产物在 ${OUT}/："
+find "$OUT" \( -name "*.apk" -o -name "*.aab" \) -print || echo "   （目录里没找到 apk/aab，检查产物路径）"

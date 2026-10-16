@@ -1,0 +1,190 @@
+# Cocos Creator 3.8.8 —— 自包含 Android 出包 workflow（单文件，无仓库内依赖）
+#
+# 与分体版的区别：
+#   1. 不依赖仓库根的 cocos-ci-build.sh（Cocos CLI + gradle 逻辑内联在本文件）
+#   2. 不要求仓库里提交 Cocos 工程：COCOS_DIR 目录不存在时自动 clone 官方
+#      3.8 模板工程（cocos/cocos-template-hello-world@v3.8）做冒烟测试；
+#      若你的真实 Cocos 工程已提交在仓库某目录，把下方 env.COCOS_DIR 指向它即可
+#
+# 关键事实（cocos-engine v3.8.8 模板核实）：
+#   - Gradle 根工程 = <项目>/build/android/proj；AGP 8.10.1 + Gradle wrapper 8.11.1 + JDK 17
+#   - release 签名属性 RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD /
+#     RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD（ORG_GRADLE_PROJECT_* 注入，密码不进命令行）
+#   - APK/AAB：build/android/proj/build/CocosGame/outputs/{apk,bundle}/
+#   - NDK 只支持 r21~r22（23+ 不支持）且无 darwin-arm64 宿主工具链 → 必须 Intel runner
+#
+# 需配 Secrets（仅 release-apk / aab 需要）：
+#   ANDROID_KEYSTORE(base64) / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD
+# 可选 repo Variables：COCOS_MAC_ZIP（编辑器直链）、COCOS_CI_RUNNER（runner 标签）
+
+name: Cocos CI 3.8.8 (Android)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "出什么包"
+        type: choice
+        options:
+          - debug-apk
+          - release-apk
+          - aab
+        default: debug-apk
+
+env:
+  COCOS_VERSION: "3.8.8"
+  # Cocos 工程目录（相对仓库根）：目录已存在则直接用；不存在则 clone 官方模板
+  COCOS_DIR: "cocosp"
+  COCOS_TPL_REPO: "https://github.com/cocos/cocos-template-hello-world"
+  COCOS_TPL_BRANCH: "v3.8"
+  ANDROID_COMPILE_SDK: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_CMAKE: "3.22.1"
+  NDK_VERSION: "21.4.7075529"
+
+jobs:
+  android:
+    runs-on: ${{ vars.COCOS_CI_RUNNER || 'macos-15-intel' }}
+    timeout-minutes: 120
+    env:
+      COCOS_MAC_ZIP: ${{ vars.COCOS_MAC_ZIP || 'https://download.cocos.com/CocosCreator/v3.8.8/CocosCreator-v3.8.8-mac-121518.zip' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析 build_type
+        run: |
+          BT="${{ inputs.build_type }}"
+          [ -n "$BT" ] || BT="debug-apk"
+          echo "BUILD_TYPE=$BT" >> "$GITHUB_ENV"
+          echo "本次出包：$BT"
+
+      - name: 准备 Cocos 工程（缺则 clone 官方 3.8 模板）
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          if [ -d "$COCOS_DIR" ] && [ -f "$COCOS_DIR/package.json" ]; then
+            echo ">> 仓库里已有 Cocos 工程：$COCOS_DIR（直接使用）"
+          else
+            [ "$COCOS_DIR" = "." ] && { echo "::error::仓库根不是 Cocos 工程（缺 package.json）"; exit 1; }
+            echo ">> 仓库里没有 $COCOS_DIR，clone 官方模板 ${COCOS_TPL_REPO}#${COCOS_TPL_BRANCH}"
+            rm -rf "$COCOS_DIR"
+            git clone --depth 1 -b "$COCOS_TPL_BRANCH" "$COCOS_TPL_REPO" "$COCOS_DIR"
+          fi
+          ls "$COCOS_DIR"
+
+      - name: 装 JDK 17（AGP 8.10.1 要求）
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 装 Android cmdline-tools
+        uses: android-actions/setup-android@v4
+
+      - name: 装 Platform / Build-Tools / CMake / NDK
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "cmake;${ANDROID_CMAKE}" \
+            "ndk;${NDK_VERSION}"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: 装 Cocos Creator 3.8.8
+        run: |
+          set -euo pipefail
+          APP_DIR=/Applications/CocosCreator
+          if [ ! -d "$APP_DIR" ]; then
+            mkdir -p "$APP_DIR"
+            echo "下载 ${COCOS_MAC_ZIP}"
+            curl -fsSL --retry 3 --retry-delay 5 -o /tmp/cc.zip "$COCOS_MAC_ZIP"
+            ditto -x -k /tmp/cc.zip "$APP_DIR"   # ditto 保留 mac 元数据/符号链接
+            rm -f /tmp/cc.zip
+          fi
+          # zip 里 CocosCreator.app 就在根（已用 HTTP range 读 zip 头确认）
+          BIN="$APP_DIR/CocosCreator.app/Contents/MacOS/CocosCreator"
+          [ -f "$BIN" ] || BIN="$APP_DIR/CocosCreator/CocosCreator.app/Contents/MacOS/CocosCreator"
+          [ -f "$BIN" ] || { echo "::error::未找到 CocosCreator.app（COCOS_MAC_ZIP 直链是否失效？）"; ls -l "$APP_DIR"; exit 1; }
+          chmod +x "$BIN"
+          echo "CC_CREATOR=$BIN" >> "$GITHUB_ENV"
+          echo "Cocos CLI：$BIN"
+
+      - name: 注入 release keystore
+        if: env.BUILD_TYPE != 'debug-apk'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEYSTORE_B64" ] || { echo "::error::缺 secret ANDROID_KEYSTORE（base64 后的 keystore）"; exit 1; }
+          printf '%s' "$KEYSTORE_B64" | tr -d '\n\r' | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+          ls -l "$GITHUB_WORKSPACE/release.keystore"
+
+      - name: Cocos 生成 Gradle 工程 + Gradle wrapper 出包
+        env:
+          CC_BUILD_TYPE: ${{ env.BUILD_TYPE }}
+          NDK_HOME: ${{ env.NDK_HOME }}
+          NDK_VER: ${{ env.NDK_VERSION }}
+          RELEASE_STORE_FILE: ${{ github.workspace }}/release.keystore
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CC_PROJ="$GITHUB_WORKSPACE/$COCOS_DIR"
+          PROJ="$CC_PROJ/build/android/proj"
+          [ -d "$NDK_HOME" ] || { echo "::error::NDK 不存在：$NDK_HOME（sdkmanager 那步失败？）"; exit 1; }
+          command -v java >/dev/null || { echo "::error::缺 java（需 JDK 17）"; exit 1; }
+          echo "java：$(java -version 2>&1 | head -1)"
+
+          case "$CC_BUILD_TYPE" in
+            debug-apk)   TASKS=(assembleDebug);   DEBUG_OPT=true ;;
+            release-apk) TASKS=(assembleRelease); DEBUG_OPT=false ;;
+            aab)         TASKS=(bundleRelease);   DEBUG_OPT=false ;;
+            *) echo "::error::未知 CC_BUILD_TYPE：$CC_BUILD_TYPE"; exit 1 ;;
+          esac
+          # release/aab：签名属性经 ORG_GRADLE_PROJECT_* 注入（等价 -P，密码不进 argv）
+          if [ "$CC_BUILD_TYPE" != "debug-apk" ]; then
+            [ -n "${RELEASE_STORE_FILE:-}" ] && [ -f "$RELEASE_STORE_FILE" ] || { echo "::error::keystore 不存在（4 个 ANDROID_KEYSTORE* secrets 配了吗？）"; exit 1; }
+            export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE="$RELEASE_STORE_FILE"
+            export ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD="$RELEASE_STORE_PASSWORD"
+            export ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS="$RELEASE_KEY_ALIAS"
+            export ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD="$RELEASE_KEY_PASSWORD"
+          fi
+
+          echo "=== Cocos 3.8.8 build android（autoCompile=false）==="
+          set +e
+          "$CC_CREATOR" --project "$CC_PROJ" --build \
+            "platform=android;autoCompile=false;debug=${DEBUG_OPT};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
+          RC=$?
+          set -e
+          [ "$RC" -eq 36 ] || { echo "::error::Cocos 构建失败（退出码 $RC：32=参数非法 / 34=过程出错；查上方日志）"; exit 1; }
+
+          [ -f "$PROJ/settings.gradle" ] || { echo "::error::未找到 Gradle 工程 $PROJ（Cocos 生成那步失败？）"; exit 1; }
+          chmod +x "$PROJ/gradlew"
+          echo "=== gradle ${TASKS[*]}（cwd=$PROJ）==="
+          ( cd "$PROJ" && ./gradlew "${TASKS[@]}" "-PPROP_NDK_VERSION=${NDK_VER}" --no-daemon )
+
+          echo "=== Android 产物 ==="
+          find "$PROJ/build" -type f -path '*/outputs/*' \( -name '*.apk' -o -name '*.aab' \) -print
+
+      - name: 校验并收集产物
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find "$COCOS_DIR/build/android/proj/build" -type f -path '*/outputs/*' \( -name '*.apk' -o -name '*.aab' \) -exec cp -v {} dist/ \;
+          [ -n "$(ls -A dist)" ] || { echo "::error::dist 为空，Gradle 输出路径不对？"; find "$COCOS_DIR/build" -maxdepth 4 -type d; exit 1; }
+          APKSIGNER="$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          for f in dist/*.apk; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            "$APKSIGNER" verify --print-certs "$f"
+            unzip -l "$f" | grep -E 'lib/[^/]+/libcocos\.so' || echo "::warning::$f 里没有 libcocos.so（ABI 是否被裁掉？）"
+          done
+          ls -lh dist
+
+      - name: 上传 apk/aab
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ env.BUILD_TYPE }}
+          path: dist/
