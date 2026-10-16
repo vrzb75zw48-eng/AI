@@ -113,6 +113,11 @@ if [ "${DO_ANDROID}" = "1" ]; then
   [ -d "${NDK_HOME}" ] || die "NDK 不存在：${NDK_HOME}（NDK 21/22 无 darwin-arm64 宿主工具链，须 x86_64 runner）"
   command -v java >/dev/null || die "缺 java（Cocos 3.8 的 AGP 8.10.1 需 JDK 17）"
   export ANDROID_SDK_ROOT="${ANDROID_HOME}"
+  # Cocos android 插件初始化（onAfterInit）在无 GUI Preferences 时读环境变量找 NDK/SDK：
+  # NDK_ROOT / ANDROID_NDK_HOME / ANDROID_HOME / ANDROID_SDK_ROOT 缺一不可（论坛+文档确认）
+  export NDK_ROOT="${NDK_HOME}"
+  export ANDROID_NDK_HOME="${NDK_HOME}"
+  export ANDROID_HOME="${ANDROID_HOME}"
   log "java：$(java -version 2>&1 | head -1)"
 
   case "${CC_BUILD_TYPE}" in
