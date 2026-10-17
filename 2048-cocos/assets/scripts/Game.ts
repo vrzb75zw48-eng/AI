@@ -7,12 +7,10 @@ import {
 const { ccclass } = _decorator;
 const UILAYER = 1 << 25; // UI_2D layer，必须与相机 visibility 匹配，否则黑屏
 
-// ===== 配置 =====
 const DIFF: Record<string, number> = { easy: 5, normal: 4, hard: 3 };
 const DIFF_LABEL: Record<string, string> = { easy: '5 × 5', normal: '4 × 4', hard: '3 × 3' };
 const TILE_IMG = ['tile1', 'tile2', 'tile3', 'tile4', 'tile5', 'tile6', 'tile7', 'tile8'];
 
-// 经典 2048 配色（横屏）
 const C = {
   bg: hex(0xfaf8ef), board: hex(0xbbada0), cell: new Color(238, 228, 218, 90),
   text: hex(0x776e65), btn: hex(0x8f7a66), white: new Color(249, 246, 242, 255),
@@ -99,76 +97,78 @@ export class Game extends Component {
     if (this.gameUI) this.gameUI.active = s === 'game';
   }
 
-  // ===== 登录（cyberpunk，横屏居中）=====
+  // ===== 登录（cyberpunk，竖屏）=====
   buildLogin() {
     const root = this.node; const W = root.getComponent(UITransform)!.contentSize.width;
     const H = root.getComponent(UITransform)!.contentSize.height;
     const n = this.cyberPanel('login', W, H); this.loginUI = n;
-    this.txt('SYSTEM READY', 14, 0, H * 0.26, C.neonDim, n);
-    this.txt('2048', 90, 0, H * 0.10, C.neon, n).getComponent(Label)!.isBold = true;
-    this.txt('CYBERPUNK EDITION', 14, 0, H * 0.02, new Color(255, 255, 255, 90), n);
+    this.txt('SYSTEM READY', 13, 0, H * 0.24, C.neonDim, n);
+    this.txt('2048', 100, 0, H * 0.14, C.neon, n).getComponent(Label)!.isBold = true;
+    this.txt('CYBERPUNK EDITION', 13, 0, H * 0.06, new Color(255, 255, 255, 90), n);
 
-    const eb = L(Node.create('nick')); const et = eb.addComponent(UITransform); et.setContentSize(220, 52);
+    const eb = L(Node.create('nick')); eb.layer = UILAYER; const et = eb.addComponent(UITransform); et.setContentSize(220, 52);
     const box = eb.addComponent(EditBox);
     box.placeholder = '输入昵称'; box.placeholderLabel = this.mkLbl('输入昵称', 16, C.neonDim);
     box.textLabel = this.mkLbl('', 18, C.neon); box.backgroundSpriteFrame = whiteSpriteFrame(); box.string = this.nick;
-    eb.setPosition(0, -H * 0.05); n.addChild(eb);
+    eb.setPosition(0, H * -0.02); n.addChild(eb);
     box.on('editing-did-ended', () => { this.nick = box.string.trim(); try { sys.localStorage.setItem('game2048-nick', this.nick); } catch (e) { } });
 
-    const ln = this.neonBtn('登录', 140, 56, () => this.onLogin()); ln.setPosition(-80, -H * 0.24); n.addChild(ln);
-    const rk = this.neonBtn('排行榜', 140, 56, () => this.showRank('login')); rk.setPosition(80, -H * 0.24); n.addChild(rk);
+    const ln = this.neonBtn('登录', 140, 56, () => this.onLogin()); ln.setPosition(-80, -H * 0.14); n.addChild(ln);
+    const rk = this.neonBtn('排行榜', 140, 56, () => this.showRank('login')); rk.setPosition(80, -H * 0.14); n.addChild(rk);
   }
   onLogin() { if (!this.nick) return; this.setState('diff'); }
 
-  // ===== 难度（cyberpunk，横屏：三按钮横排）=====
+  // ===== 难度（cyberpunk，竖屏三按钮纵排）=====
   buildDiff() {
     if (this.diffUI) return;
     const root = this.node; const W = root.getComponent(UITransform)!.contentSize.width;
     const H = root.getComponent(UITransform)!.contentSize.height;
     const n = this.cyberPanel('diff', W, H); this.diffUI = n;
-    this.txt('SELECT DIFFICULTY', 14, 0, H * 0.28, C.neonDim, n);
+    this.txt('SELECT DIFFICULTY', 13, 0, H * 0.22, C.neonDim, n);
     this.txt('选择难度', 48, 0, H * 0.14, C.neon, n).getComponent(Label)!.isBold = true;
-    const xs = [-W * 0.24, 0, W * 0.24];
     const ds = ['easy', 'normal', 'hard'];
+    let y = H * 0.02;
     for (let i = 0; i < 3; i++) {
-      const b = this.neonBtn(ds[i] === 'easy' ? '简单' : ds[i] === 'normal' ? '普通' : '困难', 180, 80, (d => () => this.onDiff(d))(ds[i]));
-      b.setPosition(xs[i], -H * 0.02); n.addChild(b);
-      this.txt(DIFF_LABEL[ds[i]], 16, 0, -30, C.neonDim, b);
+      const b = this.neonBtn(ds[i] === 'easy' ? '简单' : ds[i] === 'normal' ? '普通' : '困难', 220, 72, (d => () => this.onDiff(d))(ds[i]));
+      b.setPosition(0, y); n.addChild(b);
+      this.txt(DIFF_LABEL[ds[i]], 15, 0, -28, C.neonDim, b);
+      y -= 96;
     }
   }
   onDiff(d: string) { this.difficulty = d; this.size = DIFF[d]; this.newGame(); this.setState('game'); }
 
-  // ===== 游戏（经典米黄，横屏：grid 居中偏左，HUD/按钮居右）=====
+  // ===== 游戏（经典米黄，竖屏：HUD 顶 + 棋盘居中）=====
   buildGame() {
     if (this.gameUI) return;
     const root = this.node; const W = root.getComponent(UITransform)!.contentSize.width;
     const H = root.getComponent(UITransform)!.contentSize.height;
-    const n = L(this.rect(W + 500, H + 500, C.bg)); n.setPosition(0, 0, 0); root.addChild(n); this.gameUI = n;
+    const n = L(this.rect(W + 400, H + 600, C.bg)); n.setPosition(0, 0, 0); root.addChild(n); this.gameUI = n;
 
-    this.txt('2048', 52, W * 0.32, H * 0.34, C.text, n).getComponent(Label)!.isBold = true;
-    this.txt('滑动方块 · 合并数字 · 冲向 2048', 15, W * 0.32, H * 0.29, new Color(119, 110, 101, 200), n);
-    const sb = this.scoreBox(n, '分数', W * 0.22, H * 0.34); this.scoreLabel = sb;
-    this.bestBox = this.scoreBox(n, '最佳', W * 0.34, H * 0.34);
-    const ng = this.mkBtn('新游戏', () => this.newGame()); ng.setPosition(W * 0.32, H * 0.18); n.addChild(ng);
-    this.undoBtn = this.mkBtn('撤销', () => this.undo()); this.undoBtn.setPosition(W * 0.32, H * 0.10); n.addChild(this.undoBtn);
+    this.txt('2048', 48, -W * 0.32, H * 0.36, C.text, n).getComponent(Label)!.isBold = true;
+    this.txt('滑动方块 · 合并数字', 13, -W * 0.32, H * 0.32, new Color(119, 110, 101, 200), n);
+    this.scoreLabel = this.scoreBox(n, '分数', W * 0.20, H * 0.36);
+    this.bestBox = this.scoreBox(n, '最佳', W * 0.36, H * 0.36);
+    const ng = this.mkBtn('新游戏', () => this.newGame()); ng.setPosition(-W * 0.30, H * 0.29); n.addChild(ng);
+    this.undoBtn = this.mkBtn('撤销', () => this.undo()); this.undoBtn.setPosition(-W * 0.10, H * 0.29); n.addChild(this.undoBtn);
     this.buildGrid(n);
   }
 
   scoreBox(n: Node, cap: string, x: number, y: number): Label {
-    const box = L(this.rect(90, 60, C.board)); box.setPosition(x, y, 0); n.addChild(box);
-    this.txt(cap, 13, 0, 16, C.white, box);
-    const v = this.txt('0', 24, 0, -12, C.white, box);
+    const box = L(this.rect(84, 56, C.board)); box.setPosition(x, y, 0); n.addChild(box);
+    this.txt(cap, 12, 0, 15, C.white, box);
+    const v = this.txt('0', 22, 0, -11, C.white, box);
     return v.getComponent(Label)!;
   }
 
   buildGrid(n: Node) {
     if (this.boardRoot) this.boardRoot.destroy();
     if (this.tileRoot) this.tileRoot.destroy();
+    const W = this.node.getComponent(UITransform)!.contentSize.width;
     const H = this.node.getComponent(UITransform)!.contentSize.height;
-    this.cell = Math.min(H / (this.size + 1.4), 130);
+    this.cell = Math.min(W / (this.size + 1.4), 120);
     const total = this.size * this.cell + (this.size + 1) * this.gap;
     const board = L(this.rect(total, total, C.board));
-    board.setPosition(-this.node.getComponent(UITransform)!.contentSize.width * 0.18, 0, 0);
+    board.setPosition(0, H * 0.0, 0);
     n.addChild(board); this.boardRoot = board;
     this.tileRoot = L(Node.create('tiles')); this.tileRoot.layer = UILAYER; board.addChild(this.tileRoot);
     for (let r = 0; r < this.size; r++) for (let c = 0; c < this.size; c++) {
@@ -305,15 +305,15 @@ export class Game extends Component {
       const res = await (globalThis as any).fetch(SUPA_URL + '/rest/v1/scores?select=nickname,score,top_tile&difficulty=eq.' + this.rankDiff + '&order=score.desc&limit=10', { headers: SUPA_H });
       if (!res.ok) throw new Error('http ' + res.status);
       const data = await res.json();
-      if (!data.length) { this.txt('NO SCORES YET', 14, 0, 0, C.neonDim, this.rankList); }
+      if (!data.length) this.txt('NO SCORES YET', 14, 0, 0, C.neonDim, this.rankList);
       else {
         let y = 0;
         for (let i = 0; i < data.length; i++) {
-          const row = L(this.rect(380, 46, new Color(0, 240, 255, 12))); row.setPosition(0, y, 0); this.rankList!.addChild(row);
-          this.txt(String(i + 1), 18, -170, 0, C.neon, row);
-          this.txt(String(data[i].nickname || 'ANON').replace(/[<>&"']/g, ''), 14, -60, 0, new Color(255, 255, 255, 200), row);
-          this.txt(String(data[i].score), 16, 120, 0, C.green, row).getComponent(Label)!.isBold = true;
-          this.txt(String(data[i].top_tile || ''), 11, 165, 0, new Color(255, 255, 255, 90), row);
+          const row = L(this.rect(360, 46, new Color(0, 240, 255, 12))); row.setPosition(0, y, 0); this.rankList!.addChild(row);
+          this.txt(String(i + 1), 18, -160, 0, C.neon, row);
+          this.txt(String(data[i].nickname || 'ANON').replace(/[<>&"']/g, ''), 14, -50, 0, new Color(255, 255, 255, 200), row);
+          this.txt(String(data[i].score), 16, 110, 0, C.green, row).getComponent(Label)!.isBold = true;
+          this.txt(String(data[i].top_tile || ''), 11, 160, 0, new Color(255, 255, 255, 90), row);
           y -= 54;
         }
       }
@@ -323,16 +323,16 @@ export class Game extends Component {
     this.hideRank();
     const root = this.node; const W = root.getComponent(UITransform)!.contentSize.width;
     const H = root.getComponent(UITransform)!.contentSize.height;
-    const n = L(this.rect(W + 400, H + 400, new Color(0, 0, 0, 235))); n.setPosition(0, 0, 0); root.addChild(n); this.rankUI = n;
-    this.txt('排行榜', 34, 0, H * 0.34, C.neon, n).getComponent(Label)!.isBold = true;
+    const n = L(this.rect(W + 400, H + 600, new Color(0, 0, 0, 235))); n.setPosition(0, 0, 0); root.addChild(n); this.rankUI = n;
+    this.txt('排行榜', 34, 0, H * 0.30, C.neon, n).getComponent(Label)!.isBold = true;
     const txs = [-W * 0.2, 0, W * 0.2]; const ds = ['easy', 'normal', 'hard'];
     for (let i = 0; i < 3; i++) {
-      const b = this.neonBtn(ds[i] === 'easy' ? '简单' : ds[i] === 'normal' ? '普通' : '困难', 96, 48, (d => () => { this.rankDiff = d; this.fetchRank(); })(ds[i]));
-      b.setPosition(txs[i], H * 0.26); n.addChild(b);
+      const b = this.neonBtn(ds[i] === 'easy' ? '简单' : ds[i] === 'normal' ? '普通' : '困难', 92, 46, (d => () => { this.rankDiff = d; this.fetchRank(); })(ds[i]));
+      b.setPosition(txs[i], H * 0.24); n.addChild(b);
     }
     this.rankList = L(Node.create('list')); this.rankList.layer = UILAYER;
-    this.rankList.addComponent(UITransform).setContentSize(400, 400); this.rankList.setPosition(0, -H * 0.05); n.addChild(this.rankList);
-    const cl = this.neonBtn('关闭', 160, 54, () => this.hideRank()); cl.setPosition(0, -H * 0.36); n.addChild(cl);
+    this.rankList.addComponent(UITransform).setContentSize(380, 400); this.rankList.setPosition(0, H * 0.0); n.addChild(this.rankList);
+    const cl = this.neonBtn('关闭', 160, 52, () => this.hideRank()); cl.setPosition(0, -H * 0.34); n.addChild(cl);
     this.rankDiff = this.difficulty; this.fetchRank(); this.startRankTimer();
   }
   hideRank() { if (this.rankUI) { this.rankUI.destroy(); this.rankUI = null; this.rankList = null; } this.stopRankTimer(); }
@@ -352,11 +352,10 @@ export class Game extends Component {
   // ===== 结束 overlay =====
   showOverlay(mode: string) {
     this.hideOverlay();
-    const H = this.node.getComponent(UITransform)!.contentSize.height;
     const boardH = this.boardRoot?.getComponent(UITransform)!.contentSize.height ?? 400;
     const n = L(this.rect(boardH, boardH, new Color(13, 13, 13, 235)));
-    if (this.boardRoot) { n.parent = this.boardRoot.parent; this.boardRoot.parent!.addChild(n); n.setPosition(this.boardRoot.position); }
-    else { this.node.addChild(n); }
+    if (this.boardRoot) { this.boardRoot.parent!.addChild(n); n.setPosition(this.boardRoot.position); }
+    else this.node.addChild(n);
     this.overlayUI = n;
     if (mode === 'lose') {
       const vv = L(Node.create('vid')); vv.layer = UILAYER;
@@ -375,11 +374,11 @@ export class Game extends Component {
     }
     const cy = -boardH * 0.28;
     if (mode === 'win') {
-      const k = this.neonBtn('CONTINUE', 130, 50, () => { this.keepPlaying = true; this.hideOverlay(); }); k.setPosition(-80, cy, 0); n.addChild(k);
-      const r = this.neonBtn('RESTART', 130, 50, () => this.newGame()); r.setPosition(80, cy, 0); n.addChild(r);
+      const k = this.neonBtn('CONTINUE', 130, 48, () => { this.keepPlaying = true; this.hideOverlay(); }); k.setPosition(-80, cy, 0); n.addChild(k);
+      const r = this.neonBtn('RESTART', 130, 48, () => this.newGame()); r.setPosition(80, cy, 0); n.addChild(r);
     } else {
-      const r = this.neonBtn('RESTART', 130, 50, () => this.newGame()); r.setPosition(-60, cy, 0); n.addChild(r);
-      const rk = this.neonBtn('排行榜', 130, 50, () => this.showRank('end')); rk.setPosition(80, cy, 0); n.addChild(rk);
+      const r = this.neonBtn('RESTART', 130, 48, () => this.newGame()); r.setPosition(-60, cy, 0); n.addChild(r);
+      const rk = this.neonBtn('排行榜', 130, 48, () => this.showRank('end')); rk.setPosition(80, cy, 0); n.addChild(rk);
     }
   }
   hideOverlay() { if (this.overlayUI) { try { this.videoPlayer && this.videoPlayer.stop(); } catch (e) { } this.overlayUI.destroy(); this.overlayUI = null; this.videoPlayer = null; } }
@@ -410,9 +409,9 @@ export class Game extends Component {
   cyberPanel(name: string, W: number, H: number): Node {
     const n = L(Node.create(name)); n.layer = UILAYER; n.addComponent(UITransform).setContentSize(W, H);
     this.node.addChild(n);
-    const bg = L(this.rect(W + 500, H + 500, new Color(10, 10, 15, 255))); bg.setPosition(0, 0, 0); n.addChild(bg);
+    const bg = L(this.rect(W + 400, H + 600, new Color(10, 10, 15, 255))); bg.setPosition(0, 0, 0); n.addChild(bg);
     if (this.loginBgSF) {
-      const s = L(this.rect(W + 500, H + 500, Color.WHITE)); s.layer = UILAYER;
+      const s = L(this.rect(W + 400, H + 600, Color.WHITE)); s.layer = UILAYER;
       s.getComponent(Sprite)!.spriteFrame = this.loginBgSF; s.getComponent(Sprite)!.color = new Color(90, 90, 110, 255);
       s.getComponent(Sprite)!.layer = UILAYER; s.setPosition(0, 0, 0); n.addChild(s);
     }
