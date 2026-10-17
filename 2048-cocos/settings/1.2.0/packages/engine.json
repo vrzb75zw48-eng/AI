@@ -10,6 +10,7 @@
       "physics-cannon",
       "physics-framework",
       "audio",
+      "video",
       "tween",
       "terrain"
     ]
