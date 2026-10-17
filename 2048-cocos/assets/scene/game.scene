@@ -126,7 +126,7 @@
   },
   {
     "__type__": "cc.SkyboxInfo",
-    "_envmap": { "__uuid__": "" },
+    "_envmap": null,
     "_isRGBE": false,
     "_enabled": false,
     "_useIBL": false
