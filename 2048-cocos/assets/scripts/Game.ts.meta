@@ -1,0 +1,12 @@
+{
+  "ver": "3.0.10",
+  "importer": "typescript",
+  "isBundle": false,
+  "subMetas": {
+    "dsv": { "ver": "2.0", "importer": "dependency-selector", "files": ["d.json", "d.js"] },
+    "ncc": { "ver": "1.0", "importer": "nccs", "files": ["n.js"], "id": "" },
+    "assets": { "ver": "1.0", "importer": "asset", "files": [".json"] }
+  },
+  "uuid": "f0248e1a-2048-4c0c-8000-000000000001",
+  "userData": {}
+}

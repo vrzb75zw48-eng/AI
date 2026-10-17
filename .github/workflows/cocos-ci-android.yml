@@ -39,10 +39,10 @@ on:
 
 env:
   COCOS_VERSION: "3.8.8"
-  # Cocos 工程在仓库的 cocosp/ 子目录（官方 hello-world 3.8 模板）
-  COCOS_DIR: "cocosp"
-  # Android 包名（可用 repo Variable COCOS_PACKAGE 覆盖；Cocos android 构建必填）
-  CC_PACKAGE: ${{ vars.COCOS_PACKAGE || 'com.aicode.cocosp' }}
+  # Cocos 工程在仓库的 2048-cocos/ 子目录（2048 游戏，2D UI）
+  COCOS_DIR: "2048-cocos"
+  # Android 包名（沿用现有 WebView 版包名便于覆盖安装；可用 repo Variable 覆盖）
+  CC_PACKAGE: ${{ vars.COCOS_PACKAGE || 'com.aicode.game2048' }}
   ANDROID_COMPILE_SDK: "36"
   ANDROID_BUILD_TOOLS: "36.0.0"
   ANDROID_CMAKE: "3.22.1"
