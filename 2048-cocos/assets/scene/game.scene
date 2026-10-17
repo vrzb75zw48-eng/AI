@@ -80,7 +80,7 @@
     "_shutter": 7,
     "_iso": 0,
     "_screenScale": 1,
-    "_visibility": 33554432,
+    "_visibility": 4294967295,
     "_targetTexture": null,
     "_id": "cm2048a0000000000000001"
   },
