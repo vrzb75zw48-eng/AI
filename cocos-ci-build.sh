@@ -128,7 +128,7 @@ if [ "${DO_ANDROID}" = "1" ]; then
   esac
 
   # packages 参数必须是 JSON 字符串（官方文档："需要存放的是数据对象的序列化字符串"）
-  ccbuild android "autoCompile=false;debug=${DEBUG_OPT}packages={\"android\":{\"packageName\":\"${CC_PACKAGE}\",\"sdkPath\":\"${ANDROID_HOME}\",\"ndkPath\":\"${NDK_HOME}\"}};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
+  ccbuild android "autoCompile=false;debug=${DEBUG_OPT};packages={\"android\":{\"packageName\":\"${CC_PACKAGE}\",\"sdkPath\":\"${ANDROID_HOME}\",\"ndkPath\":\"${NDK_HOME}\"}};ndkPath=${NDK_HOME};sdkPath=${ANDROID_HOME}"
   gradlew_run "${TASKS[@]}" "-PPROP_NDK_VERSION=${NDK_VER}"
 
   ART="$(find "${PROJ_DIR}/build" -type f -path '*/outputs/*' \( -name '*.apk' -o -name '*.aab' \) -print)"
